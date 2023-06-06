@@ -4,14 +4,51 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
+
+	cca "gopkg.in/mineo/gocaa.v1"
 )
 
 const (
 	musicBrainzReleaseEndpint    = "%s/ws/2/release/"
 	musicBrainzReleaseQueryValue = "release:%s AND artist:%s"
 )
+
+// GetFrontImage returns the front image for particular `album` from `artist`.
+func (c *Client) GetFrontImage(
+	ctx context.Context,
+	artist,
+	album string,
+) ([]byte, error) {
+	mbIDs, err := c.getMusicBrainzReleaseID(ctx, artist, album)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, mbidStr := range mbIDs {
+		mbid := cca.StringToUUID(mbidStr)
+		img, err := c.caaClient.GetReleaseFront(mbid, cca.ImageSize500)
+		if err == nil {
+			log.Printf(
+				"Downloaded image for artist(%s) album(%s) with mbID %s",
+				artist,
+				album,
+				mbidStr,
+			)
+			return img.Data, nil
+		}
+
+		httpErr, ok := err.(cca.HTTPError)
+		if ok && httpErr.StatusCode == http.StatusNotFound {
+			continue
+		}
+		return img.Data, err
+	}
+
+	return nil, ErrImageNotFound
+}
 
 // getMusicBrainzReleaseID uses the MusicBrainz API to retrieve a list of matching
 // MusicBrainzIDs (or mbid) for particular "release". Or album in HTTPMS parlance.
