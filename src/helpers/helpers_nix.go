@@ -8,5 +8,5 @@ package helpers
 
 const (
 	// musicstreamingapi is the name of the MusicStreamingAPI directory in the user's home directory.
-	euterpeDir = ".musicstreamingapi"
+	musicstreamingapiDir = ".musicstreamingapi"
 )
