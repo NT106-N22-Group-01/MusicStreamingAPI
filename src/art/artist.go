@@ -2,8 +2,12 @@ package art
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +30,53 @@ var ErrNoDiscogsAuth = fmt.Errorf("authentication with Discogs is not configured
 // errNoDiscogsRel is returned when the Artist did not have a "discogs" type relation
 // in its Music Brainz information or when this relation was not parsed as expected.
 var errNoDiscogsRel = fmt.Errorf("no Discogs relation found in Music Brainz info")
+
+// GetArtistImage finds and returns an image of particular artist. If none is found
+// it returns ErrImageNotFound.
+func (c *Client) GetArtistImage(
+	ctx context.Context,
+	artist string,
+) ([]byte, error) {
+	if c.discogsAuthToken == "" {
+		return nil, ErrNoDiscogsAuth
+	}
+
+	mbIDs, err := c.getMusicBrainzArtistID(ctx, artist)
+	if err != nil {
+		return nil, err
+	}
+
+	const maxTries = 2
+	var (
+		discogID string
+		tries    int
+	)
+
+	for _, mbID := range mbIDs {
+		if tries >= maxTries {
+			return nil, ErrImageNotFound
+		}
+
+		dID, err := c.getDiscogsArtistID(ctx, mbID)
+		if err == nil {
+			discogID = dID
+			break
+		}
+		tries++
+
+		if errors.Is(err, errNoDiscogsRel) {
+			continue
+		}
+
+		return nil, err
+	}
+
+	if discogID == "" {
+		return nil, ErrImageNotFound
+	}
+
+	return c.getDiscogsArtistImage(ctx, discogID)
+}
 
 // getMusicBrainzArtistID uses the MusicBrainz API to retrieve a list of matching
 // MusicBrainzIDs (or mbid) for particular "artist".
@@ -164,6 +215,106 @@ func (c *Client) getDiscogsArtistID(
 	}
 
 	return "", errNoDiscogsRel
+}
+
+func (c *Client) getDiscogsArtistImage(
+	ctx context.Context,
+	discogID string,
+) ([]byte, error) {
+	// The Discogs API requests are not guarded behind the Client delayer since all
+	// of them are naturally throttled by the MusicBrainz API delays. Why? Because
+	// the Discogs API calls can only happen as a result from a MusicBrainz API call
+	// proceeding it.
+
+	endpointURL := fmt.Sprintf(
+		discogsArtistEndpoint,
+		c.discogsAPIHost,
+		url.PathEscape(discogID),
+	)
+	req, err := http.NewRequest(http.MethodGet, endpointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating Discogs API req: %w", err)
+	}
+	req.Header.Set("User-Agent", c.useragent)
+	req.Header.Set("Authorization", fmt.Sprintf("Discogs token=%s", c.discogsAuthToken))
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request to Discogs API failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf(
+			"artist XML API (Discogs) returned HTTP %d",
+			resp.StatusCode,
+		)
+	}
+
+	var dca dcArtist
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&dca); err != nil {
+		return nil, fmt.Errorf("unrecognised JSON returned by Discogs: %w", err)
+	}
+
+	// First search for the primary image and use it if found.
+	for _, image := range dca.Images {
+		if image.URI == "" {
+			continue
+		}
+
+		imgBytes, err := c.downloadDiscogsImage(ctx, image.URI)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		} else if err != nil {
+			log.Printf("error downloading Discogs image: %s\n", err)
+			continue
+		}
+
+		return imgBytes, nil
+	}
+
+	return nil, ErrImageNotFound
+}
+
+func (c *Client) downloadDiscogsImage(
+	ctx context.Context,
+	URL string,
+) ([]byte, error) {
+	imgReq, err := http.NewRequest(http.MethodGet, URL, nil)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"malformed URL returned by the Discogs API (%s): %w",
+			URL,
+			err,
+		)
+	}
+	imgReq.Header.Set("User-Agent", c.useragent)
+
+	imgResp, err := http.DefaultClient.Do(imgReq)
+	if err != nil {
+		return nil, fmt.Errorf("request for Discogs image failed: %w", err)
+	}
+	defer imgResp.Body.Close()
+
+	if imgResp.StatusCode != http.StatusOK {
+		return nil, ErrImageNotFound
+	}
+
+	const imageLimitSize = 1024 * 1024 * 2
+	imgBytes, err := io.ReadAll(io.LimitReader(imgResp.Body, imageLimitSize))
+	if (err == nil || errors.Is(err, io.EOF)) && len(imgBytes) == imageLimitSize {
+		return nil, ErrImageTooBig
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting Discogs image failed: %w", err)
+	}
+
+	return imgBytes, nil
 }
 
 // The following are structures only used to decode the XML response from MusicBrainz
