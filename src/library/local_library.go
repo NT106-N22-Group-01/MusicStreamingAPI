@@ -12,12 +12,14 @@ import (
 	"sync"
 
 	"github.com/howeyc/fsnotify"
+	taglib "github.com/wtolson/go-taglib"
 
 	// Blind import is the way a SQL driver is imported. This is the proposed way
 	// from the golang documentation.
 	_ "github.com/mattn/go-sqlite3"
 
 	"NT106/Group01/MusicStreamingAPI/src/art"
+	"NT106/Group01/MusicStreamingAPI/src/helpers"
 	"NT106/Group01/MusicStreamingAPI/src/scaler"
 )
 
@@ -342,6 +344,529 @@ func (lib *LocalLibrary) removeDirectory(dirPath string) {
 	if err := lib.executeDBJobAndWait(work); err != nil {
 		log.Printf("Error executing remove dir db work: %s", err)
 	}
+}
+
+// AddMedia adds a file specified by its file system name to the library. Will create the
+// needed Artist, Album if necessary.
+func (lib *LocalLibrary) AddMedia(filename string) error {
+	filename = filepath.Clean(filename)
+
+	if lib.MediaExistsInLibrary(filename) {
+		return nil
+	}
+
+	if _, err := fs.Stat(lib.fs, filename); err != nil {
+		return err
+	}
+
+	file, err := taglib.Read(filename)
+
+	if err != nil {
+		return fmt.Errorf("Taglib error for %s: %s", filename, err.Error())
+	}
+
+	defer file.Close()
+
+	return lib.insertMediaIntoDatabase(file, filename)
+}
+
+// MediaExistsInLibrary checks if the media file with file system path "filename" has
+// been added to the library already.
+func (lib *LocalLibrary) MediaExistsInLibrary(filename string) bool {
+	var res bool
+
+	work := func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				count(id)
+			FROM
+				tracks
+			WHERE
+				fs_path = ?
+		`)
+		if err != nil {
+			res = false
+			return fmt.Errorf("could not prepare sql statement: %s", err)
+		}
+		defer smt.Close()
+
+		var count int
+		err = smt.QueryRow(filename).Scan(&count)
+
+		if err != nil {
+			res = false
+			return fmt.Errorf("error checking whether media exists already: %s", err)
+		}
+
+		res = (count >= 1)
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error on executing db job: %s", err)
+	}
+
+	return res
+}
+
+// insertMediaIntoDatabase accepts an already parsed media info object, its path.
+// The method inserts this media into the library database.
+func (lib *LocalLibrary) insertMediaIntoDatabase(file MediaFile, filePath string) error {
+	artist := strings.TrimSpace(file.Artist())
+	artistID, err := lib.setArtistID(artist)
+	if err != nil {
+		return err
+	}
+
+	fileDir := filepath.Dir(filePath)
+
+	album := strings.TrimSpace(file.Album())
+	albumID, err := lib.setAlbumID(album, fileDir)
+
+	if err != nil {
+		return err
+	}
+
+	trackNumber := int64(file.Track())
+	if trackNumber == 0 {
+		trackNumber = helpers.GuessTrackNumber(filePath)
+	}
+
+	title := strings.TrimSpace(file.Title())
+	_, err = lib.setTrackID(
+		title,
+		filePath,
+		trackNumber,
+		artistID,
+		albumID,
+		file.Length().Milliseconds(),
+	)
+	return err
+}
+
+// GetArtistID returns the id for this artist. When missing or on error
+// returns that error.
+func (lib *LocalLibrary) GetArtistID(artist string) (int64, error) {
+	var artistID int64
+
+	work := func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				id
+			FROM
+				artists
+			WHERE
+				name = ?
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer smt.Close()
+
+		var id int64
+		err = smt.QueryRow(artist).Scan(&id)
+
+		if err != nil {
+			return err
+		}
+
+		artistID = id
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	return artistID, nil
+}
+
+// Sets a new ID for this artist if it is new to the library. If not, returns
+// its current id.
+func (lib *LocalLibrary) setArtistID(artist string) (int64, error) {
+	if len(artist) < 1 {
+		artist = UnknownLabel
+	}
+
+	id, err := lib.GetArtistID(artist)
+	if err == nil {
+		return id, nil
+	}
+
+	var lastInsertID int64
+	work := func(db *sql.DB) error {
+		stmt, err := db.Prepare(`
+				INSERT INTO
+					artists (name)
+				VALUES
+					(?)
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer stmt.Close()
+
+		res, err := stmt.Exec(artist)
+		if err != nil {
+			return err
+		}
+
+		lastInsertID, _ = res.LastInsertId()
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	newID, err := lib.GetArtistID(artist)
+	if err != nil {
+		return lastInsertID, fmt.Errorf(
+			"getting the ID of inserted artist failed: %w", err)
+	}
+
+	log.Printf("Inserted artist id: %d, name: %s\n", newID, artist)
+	if lastInsertID != newID {
+		// In case this log is never seen for a long time it would mean that
+		// the LastInsertId() bug has been fixed and it is probably safe to
+		// remove the second SQL request which explicitly queries the DB for
+		// the ID.
+		log.Printf(
+			"Wrong ID returned for artist `%s` by .LastInsertId(). "+
+				"Returned: %d, actual: %d.",
+			artist,
+			lastInsertID,
+			newID,
+		)
+	}
+
+	return newID, nil
+}
+
+// GetAlbumID returns the id for this album. When missing or on error
+// returns that error.
+func (lib *LocalLibrary) GetAlbumID(album string, fsPath string) (int64, error) {
+	var albumID int64
+
+	work := func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				id
+			FROM
+				albums
+			WHERE
+				name = ? AND
+				fs_path = ?
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer smt.Close()
+
+		var id int64
+		err = smt.QueryRow(album, fsPath).Scan(&id)
+		if err != nil {
+			return err
+		}
+
+		albumID = id
+		return nil
+	}
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	return albumID, nil
+}
+
+// Sets a new ID for this album if it is new to the library. If not, returns
+// its current id. Albums with the same name but by different locations need to have
+// separate IDs hence the fsPath parameter.
+func (lib *LocalLibrary) setAlbumID(album string, fsPath string) (int64, error) {
+	if len(album) < 1 {
+		album = UnknownLabel
+	}
+
+	id, err := lib.GetAlbumID(album, fsPath)
+	if err == nil {
+		return id, nil
+	}
+
+	var lastInsertID int64
+	work := func(db *sql.DB) error {
+		stmt, err := db.Prepare(`
+				INSERT INTO
+					albums (name, fs_path)
+				VALUES
+					(?, ?)
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer stmt.Close()
+
+		res, err := stmt.Exec(album, fsPath)
+		if err != nil {
+			return fmt.Errorf("executing album insert: %w", err)
+		}
+
+		lastInsertID, _ = res.LastInsertId()
+		return nil
+	}
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	// For some reason the sql.Result.LastInsertId() function does not always
+	// return the correct ID. This might be a problem with the particular SQL
+	// driver used. In any case, explicitly selecting it is the safest option.
+	newID, err := lib.GetAlbumID(album, fsPath)
+	if err != nil {
+		return 0, fmt.Errorf("could not get ID of inserted album: %s", err)
+	}
+
+	log.Printf("Inserted album id: %d, name: %s, path: %s\n", newID, album, fsPath)
+	if lastInsertID != newID {
+		// In case this log is never seen for a long time it would mean that
+		// the LastInsertId() bug has been fixed and it is probably safe to
+		// remove the second SQL request which explicitly queries the DB for
+		// the ID.
+		log.Printf(
+			"Wrong ID returned for album `%s` (%s) by .LastInsertId(). "+
+				"Returned: %d, actual: %d.",
+			album,
+			fsPath,
+			lastInsertID,
+			newID,
+		)
+	}
+
+	return newID, nil
+}
+
+// GetAlbumFSPathByName returns all the file paths which contain versions of an album.
+func (lib *LocalLibrary) GetAlbumFSPathByName(albumName string) ([]string, error) {
+	var paths []string
+
+	work := func(db *sql.DB) error {
+		row, err := db.Query(`
+			SELECT
+				fs_path
+			FROM
+				albums
+			WHERE
+				name = ?
+		`, albumName)
+		if err != nil {
+			return err
+		}
+
+		defer row.Close()
+
+		var albumPath string
+		for row.Next() {
+			if err := row.Scan(&albumPath); err != nil {
+				return err
+			}
+			paths = append(paths, albumPath)
+		}
+
+		return nil
+	}
+
+	err := lib.executeDBJobAndWait(work)
+	if err != nil {
+		return paths, err
+	}
+
+	if len(paths) < 1 {
+		return nil, ErrAlbumNotFound
+	}
+
+	return paths, nil
+}
+
+// GetAlbumFSPathByID returns the album path by its ID
+func (lib *LocalLibrary) GetAlbumFSPathByID(albumID int64) (string, error) {
+	var path string
+
+	work := func(db *sql.DB) error {
+		row, err := db.Query(`
+			SELECT
+				fs_path
+			FROM
+				albums
+			WHERE
+				id = ?
+		`, albumID)
+		if err != nil {
+			return err
+		}
+
+		defer row.Close()
+
+		if row.Next() {
+			if err := row.Scan(&path); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		return ErrAlbumNotFound
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+// GetTrackID returns the id for this track. When missing or on error returns that error.
+func (lib *LocalLibrary) GetTrackID(
+	title string,
+	artistID int64,
+	albumID int64,
+) (int64, error) {
+	var newID int64
+
+	work := func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				id
+			FROM
+				tracks
+			WHERE
+				name = ? AND
+				artist_id = ? AND
+				album_id = ?
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer smt.Close()
+
+		var id int64
+		err = smt.QueryRow(title, artistID, albumID).Scan(&id)
+		if err != nil {
+			return err
+		}
+
+		newID = id
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	return newID, nil
+}
+
+// Sets a new ID for this track if it is new to the library. If not, returns
+// its current id. Tracks with the same name but by different artists and/or album
+// need to have separate IDs hence the artistID and albumID parameters.
+// Additionally trackNumber and file system path (fsPath) are required. They are
+// used when retrieving this particular song for playing.
+//
+// In case the track with this file system path already exists in the library it
+// is updated with new values for title, number, artist ID and album ID.
+func (lib *LocalLibrary) setTrackID(title, fsPath string,
+	trackNumber, artistID, albumID, duration int64) (int64, error) {
+
+	if len(title) < 1 {
+		title = filepath.Base(fsPath)
+	}
+
+	var lastInsertID int64
+	work := func(db *sql.DB) error {
+		stmt, err := db.Prepare(`
+			INSERT INTO
+				tracks (name, album_id, artist_id, fs_path, number, duration)
+			VALUES
+				($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (fs_path) DO
+			UPDATE SET
+				name = $1,
+				album_id = $2,
+				artist_id = $3,
+				number = $5,
+				duration = $6
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer stmt.Close()
+
+		res, err := stmt.Exec(title, albumID, artistID, fsPath, trackNumber, duration)
+		if err != nil {
+			return err
+		}
+
+		lastInsertID, _ = res.LastInsertId()
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	// Getting the track by its fs_path.
+	var trackID int64
+	work = func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				id
+			FROM
+				tracks
+			WHERE
+				fs_path = ?
+		`)
+		if err != nil {
+			return err
+		}
+
+		defer smt.Close()
+
+		var id int64
+		err = smt.QueryRow(fsPath).Scan(&id)
+		if err != nil {
+			return err
+		}
+
+		trackID = id
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	log.Printf("Inserted id: %d, name: %s, album ID: %d, artist ID: %d, "+
+		"number: %d, dur: %d, fs_path: %s\n", trackID, title, albumID, artistID,
+		trackNumber, duration, fsPath)
+
+	if !lib.runningRescan && lastInsertID != trackID {
+		// In case this log is never seen for a long time it would mean that
+		// the LastInsertId() bug has been fixed and it is probably safe to
+		// remove the second SQL request which explicitly queries the DB for
+		// the ID.
+		log.Printf(
+			"Wrong ID returned for track `%s` by .LastInsertId(). "+
+				"Returned: %d, actual: %d.",
+			fsPath,
+			lastInsertID,
+			trackID,
+		)
+	}
+
+	return trackID, nil
 }
 
 // NewLocalLibrary returns a new LocalLibrary which will use for database the file
