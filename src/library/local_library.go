@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
+	"log"
 	"sync"
 
 	"github.com/howeyc/fsnotify"
@@ -118,6 +120,116 @@ type LocalLibrary struct {
 
 	// runningRescan shows that at the moment a complete rescan is running.
 	runningRescan bool
+}
+
+// Close closes the database connection. It is safe to call it as many times as you want.
+func (lib *LocalLibrary) Close() {
+	lib.ctxCancelFunc()
+	lib.db.Close()
+}
+
+// AddLibraryPath adds a library directory to the list of libraries which will be
+// scanned and consequently watched.
+func (lib *LocalLibrary) AddLibraryPath(path string) {
+	if _, err := fs.Stat(lib.fs, path); err != nil {
+		log.Printf("error adding path: %s", err)
+		return
+	}
+
+	lib.paths = append(lib.paths, path)
+}
+
+// Search searches in the library. Will match against the track's name, artist and album.
+func (lib *LocalLibrary) Search(searchTerm string) []SearchResult {
+	searchTerm = fmt.Sprintf("%%%s%%", searchTerm)
+
+	var output []SearchResult
+	work := func(db *sql.DB) error {
+		rows, err := db.Query(`
+			SELECT
+				t.id as track_id,
+				t.name as track,
+				al.name as album,
+				at.name as artist,
+				at.id as artist_id,
+				t.number as track_number,
+				t.album_id as album_id,
+				t.fs_path as fs_path,
+				t.duration as duration
+			FROM
+				tracks as t
+					LEFT JOIN albums as al ON al.id = t.album_id
+					LEFT JOIN artists as at ON at.id = t.artist_id
+			WHERE
+				t.name LIKE ? OR
+				al.name LIKE ? OR
+				at.name LIKE ?
+			ORDER BY
+				al.name, t.number
+		`, searchTerm, searchTerm, searchTerm)
+		if err != nil {
+			log.Printf("Query not successful: %s\n", err.Error())
+			return nil
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			var res SearchResult
+
+			err := rows.Scan(&res.ID, &res.Title, &res.Album, &res.Artist,
+				&res.ArtistID, &res.TrackNumber, &res.AlbumID, &res.Format,
+				&res.Duration)
+			if err != nil {
+				log.Printf("Error scanning search result: %s\n", err)
+				continue
+			}
+
+			res.Format = mediaFormatFromFileName(res.Format)
+
+			output = append(output, res)
+		}
+
+		return nil
+	}
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error executing search db work: %s", err)
+		return output
+	}
+	return output
+}
+
+// GetFilePath returns the filesystem path for a file specified by its ID.
+func (lib *LocalLibrary) GetFilePath(ID int64) string {
+	var filePath string
+	work := func(db *sql.DB) error {
+		smt, err := db.Prepare(`
+			SELECT
+				fs_path
+			FROM
+				tracks
+			WHERE
+				id = ?
+		`)
+		if err != nil {
+			log.Printf("Error getting file path: %s\n", err)
+			return nil
+		}
+
+		defer smt.Close()
+
+		err = smt.QueryRow(ID).Scan(&filePath)
+		if err != nil {
+			log.Printf("Error file path query row: %s\n", err)
+			return nil
+		}
+
+		return nil
+	}
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error executing get file path db work: %s", err)
+		return filePath
+	}
+	return filePath
 }
 
 // NewLocalLibrary returns a new LocalLibrary which will use for database the file
