@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"path/filepath"
@@ -867,6 +868,73 @@ func (lib *LocalLibrary) setTrackID(title, fsPath string,
 	}
 
 	return trackID, nil
+}
+
+// Initialize should be run once every time a library is created. It checks for the
+// sqlite database file and creates one if it is absent. If a file is found
+// it does nothing.
+func (lib *LocalLibrary) Initialize() error {
+	if lib.db == nil {
+		return errors.New("library is not opened, call its Open method first")
+	}
+
+	// This database is already created and populated. We could just apply the
+	// migrations without executing the initial schema.
+	if st, err := fs.Stat(lib.fs, lib.database); err == nil && st.Size() > 0 {
+		return lib.applyMigrations()
+	}
+
+	sqlSchema, err := lib.readSchema()
+
+	if err != nil {
+		return err
+	}
+
+	queries := strings.Split(sqlSchema, ";")
+
+	for _, query := range queries {
+		query = strings.TrimSpace(query)
+
+		if len(query) < 1 {
+			continue
+		}
+
+		_, err = lib.db.Exec(query)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return lib.applyMigrations()
+}
+
+// Returns the SQL schema for the library. It is stored in the project root directory
+// under sqls/library_schema.sql
+func (lib *LocalLibrary) readSchema() (string, error) {
+	out, err := lib.sqlFilesFS.Open(sqlSchemaFile)
+	if err != nil {
+		return "", fmt.Errorf(
+			"error opening schema file: %s",
+			err,
+		)
+	}
+	defer out.Close()
+
+	schema, err := io.ReadAll(out)
+	if err != nil {
+		return "", fmt.Errorf(
+			"error reading schema file `%s`: %s",
+			sqlSchemaFile,
+			err,
+		)
+	}
+
+	if len(schema) < 1 {
+		return "", fmt.Errorf("SQL schema was empty")
+	}
+
+	return string(schema), nil
 }
 
 // NewLocalLibrary returns a new LocalLibrary which will use for database the file
