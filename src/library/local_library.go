@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/howeyc/fsnotify"
@@ -230,6 +232,116 @@ func (lib *LocalLibrary) GetFilePath(ID int64) string {
 		return filePath
 	}
 	return filePath
+}
+
+// GetAlbumFiles satisfies the Library interface
+func (lib *LocalLibrary) GetAlbumFiles(albumID int64) []SearchResult {
+	var output []SearchResult
+	work := func(db *sql.DB) error {
+		rows, err := db.Query(`
+			SELECT
+				t.id as track_id,
+				t.name as track,
+				al.name as album,
+				at.name as artist,
+				at.id as artist_id,
+				t.number as track_number,
+				t.album_id as album_id,
+				t.fs_path as fs_path
+			FROM
+				tracks as t
+					LEFT JOIN albums as al ON al.id = t.album_id
+					LEFT JOIN artists as at ON at.id = t.artist_id
+			WHERE
+				t.album_id = ?
+			ORDER BY
+				al.name, t.number
+		`, albumID)
+		if err != nil {
+			log.Printf("Query not successful: %s\n", err.Error())
+			return nil
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			var res SearchResult
+			err := rows.Scan(
+				&res.ID,
+				&res.Title,
+				&res.Album,
+				&res.Artist,
+				&res.ArtistID,
+				&res.TrackNumber,
+				&res.AlbumID,
+				&res.Format,
+			)
+			if err != nil {
+				return fmt.Errorf("scanning error: %w", err)
+			}
+
+			res.Format = mediaFormatFromFileName(res.Format)
+
+			output = append(output, res)
+		}
+
+		return nil
+	}
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error executing get album files db work: %s", err)
+		return output
+	}
+	return output
+}
+
+// Removes the file from the library. That means finding it in the database and
+// removing it from there.
+func (lib *LocalLibrary) removeFile(filePath string) {
+
+	fullPath, err := filepath.Abs(filePath)
+
+	if err != nil {
+		log.Printf("Error removing %s: %s\n", filePath, err.Error())
+		return
+	}
+
+	work := func(db *sql.DB) error {
+		_, err := db.Exec(`
+			DELETE FROM tracks
+			WHERE fs_path = ?
+		`, fullPath)
+		if err != nil {
+			log.Printf("Error removing %s: %s\n", fullPath, err.Error())
+		}
+
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error executing remove file db work: %s", err)
+	}
+}
+
+// Removes files which belong in this directory from the library.
+func (lib *LocalLibrary) removeDirectory(dirPath string) {
+
+	// Adding slash at the end to make sure we are always removing directories
+	deleteMatch := fmt.Sprintf("%s/%%", strings.TrimRight(dirPath, "/"))
+
+	work := func(db *sql.DB) error {
+		_, err := db.Exec(`
+			DELETE FROM tracks
+			WHERE fs_path LIKE ?
+		`, deleteMatch)
+		if err != nil {
+			log.Printf("Error removing %s: %s\n", dirPath, err.Error())
+		}
+
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		log.Printf("Error executing remove dir db work: %s", err)
+	}
 }
 
 // NewLocalLibrary returns a new LocalLibrary which will use for database the file
