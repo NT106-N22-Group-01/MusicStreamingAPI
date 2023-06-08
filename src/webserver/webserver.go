@@ -76,6 +76,7 @@ func (srv *Server) Serve() {
 func (srv *Server) serveGoroutine() {
 	staticFilesHandler := http.FileServer(http.FS(srv.httpRootFS))
 	searchHandler := NewSearchHandler(srv.library)
+	albumHandler := NewAlbumHandler(srv.library)
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
@@ -84,9 +85,13 @@ func (srv *Server) serveGoroutine() {
 	router.Handle(APIv1EndpointSearchWithPath, searchHandler).Methods(
 		APIv1Methods[APIv1EndpointSearchWithPath]...,
 	)
+	router.Handle(APIv1EndpointDownloadAlbum, albumHandler).Methods(
+		APIv1Methods[APIv1EndpointDownloadAlbum]...,
+	)
 
 	router.Handle("/search/{searchQuery}", searchHandler).Methods("GET")
 	router.Handle("/search", searchHandler).Methods("GET")
+	router.Handle("/album/{albumID}", albumHandler).Methods("GET")
 	router.PathPrefix("/").Handler(staticFilesHandler).Methods("GET")
 }
 
