@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -84,11 +85,13 @@ func (srv *Server) serveGoroutine() {
 	)
 	artistImageHandler := NewArtistImagesHandler(srv.library)
 	browseHandler := NewBrowseHandler(srv.library)
+	mediaFileHandler := NewFileHandler(srv.library)
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
 	router.UseEncodedPath()
 
+	// API methods
 	router.Handle(APIv1EndpointSearchWithPath, searchHandler).Methods(
 		APIv1Methods[APIv1EndpointSearchWithPath]...,
 	)
@@ -104,6 +107,9 @@ func (srv *Server) serveGoroutine() {
 	router.Handle(APIv1EndpointBrowse, browseHandler).Methods(
 		APIv1Methods[APIv1EndpointBrowse]...,
 	)
+	router.Handle(APIv1EndpointFile, mediaFileHandler).Methods(
+		APIv1Methods[APIv1EndpointFile]...,
+	)
 
 	router.Handle("/search/{searchQuery}", searchHandler).Methods("GET")
 	router.Handle("/search", searchHandler).Methods("GET")
@@ -114,8 +120,39 @@ func (srv *Server) serveGoroutine() {
 	router.Handle("/artist/{artistID}/image", artistImageHandler).Methods(
 		"GET", "PUT", "DELETE",
 	)
+	router.Handle("/file/{fileID}", mediaFileHandler).Methods("GET")
 	router.Handle("/browse", browseHandler).Methods("GET")
 	router.PathPrefix("/").Handler(staticFilesHandler).Methods("GET")
+
+	handler := NewTerryHandler(router)
+
+	handler = func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, closeRequest := context.WithCancel(srv.ctx)
+			h.ServeHTTP(w, r.WithContext(ctx))
+			closeRequest()
+		})
+	}(handler)
+
+	srv.httpSrv = &http.Server{
+		Addr:           "localhost:80",
+		Handler:        handler,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   1200 * time.Second,
+		MaxHeaderBytes: 1048576,
+	}
+
+	var reason error
+
+	reason = srv.listenAndServe()
+
+	log.Println("Webserver stopped.")
+
+	if reason != nil {
+		log.Printf("Reason: %s\n", reason)
+	}
+
+	srv.cancelFunc()
 }
 
 // Uses our own listener to make our server stoppable. Similar to
