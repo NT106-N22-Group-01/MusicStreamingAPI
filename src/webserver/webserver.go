@@ -4,7 +4,6 @@ package webserver
 
 import (
 	"context"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -49,10 +48,6 @@ type Server struct {
 	// This server's library with media
 	library *library.LocalLibrary
 
-	// httpRootFS is the directory which contains the
-	// static files served by HTTPMS.
-	httpRootFS fs.FS
-
 	// Makes the server lockable. This lock should be used for accessing the
 	// listener
 	sync.Mutex
@@ -73,12 +68,10 @@ func (srv *Server) Serve() {
 }
 
 func (srv *Server) serveGoroutine() {
-	staticFilesHandler := http.FileServer(http.FS(srv.httpRootFS))
 	searchHandler := NewSearchHandler(srv.library)
 	albumHandler := NewAlbumHandler(srv.library)
 	artworkHandler := NewAlbumArtworkHandler(
 		srv.library,
-		srv.httpRootFS,
 		notFoundAlbumImage,
 	)
 	artistImageHandler := NewArtistImagesHandler(srv.library)
@@ -131,7 +124,6 @@ func (srv *Server) serveGoroutine() {
 	)
 	router.Handle("/file/{fileID}", mediaFileHandler).Methods("GET")
 	router.Handle("/browse", browseHandler).Methods("GET")
-	router.PathPrefix("/").Handler(staticFilesHandler).Methods("GET")
 
 	handler := NewTerryHandler(router)
 
@@ -203,8 +195,6 @@ func NewServer(
 	ctx context.Context,
 	cfg config.Config,
 	lib *library.LocalLibrary,
-	httpRootFS fs.FS,
-	htmlTemplatesFS fs.FS,
 ) *Server {
 	ctx, cancelCtx := context.WithCancel(ctx)
 	return &Server{
@@ -212,6 +202,5 @@ func NewServer(
 		cancelFunc: cancelCtx,
 		cfg:        cfg,
 		library:    lib,
-		httpRootFS: httpRootFS,
 	}
 }

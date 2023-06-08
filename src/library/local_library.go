@@ -86,9 +86,6 @@ func init() {
 // LocalLibrary implements the Library interface. Will represent files found on the
 // local storage
 type LocalLibrary struct {
-	// The configuration for how to scan the libraries.
-	// ScanConfig config.ScanSection
-
 	database string         // The location of the library's database
 	paths    []string       // FS locations which contain the library's media files
 	db       *sql.DB        // Database handler

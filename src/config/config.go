@@ -15,7 +15,6 @@ import (
 	"log"
 	"os/user"
 	"path/filepath"
-	"time"
 
 	"NT106/Group01/MusicStreamingAPI/src/helpers"
 
@@ -49,22 +48,12 @@ var defaultConfig = Config{
 
 // Config contains representation for everything in config.json
 type Config struct {
-	Listen           string      `json:"listen,omitempty"`
-	Auth             bool        `json:"basic_authenticate,omitempty"`
-	Authenticate     Auth        `json:"authentication,omitempty"`
-	Libraries        []string    `json:"libraries,omitempty"`
-	LibraryScan      ScanSection `json:"library_scan,omitempty"`
-	SqliteDatabase   string      `json:"sqlite_database,omitempty"`
-	DiscogsAuthToken string      `json:"discogs_auth_token,omitempty"`
-}
-
-// ScanSection is used for merging the two configs. Its purpose is to essentially
-// hold the default values for its properties.
-type ScanSection struct {
-	Disable           bool          `json:"disable,omitempty"`
-	FilesPerOperation int64         `json:"files_per_operation,omitempty"`
-	SleepPerOperation time.Duration `json:"sleep_after_operation,omitempty"`
-	InitialWait       time.Duration `json:"initial_wait_duration,omitempty"`
+	Listen           string   `json:"listen,omitempty"`
+	Auth             bool     `json:"basic_authenticate,omitempty"`
+	Authenticate     Auth     `json:"authentication,omitempty"`
+	Libraries        []string `json:"libraries,omitempty"`
+	SqliteDatabase   string   `json:"sqlite_database,omitempty"`
+	DiscogsAuthToken string   `json:"discogs_auth_token,omitempty"`
 }
 
 // Auth represents a configuration HTTP Basic authentication

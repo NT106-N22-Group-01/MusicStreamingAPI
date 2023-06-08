@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -20,7 +19,6 @@ import (
 // a particular album.
 type AlbumArtworkHandler struct {
 	artworkManager library.ArtworkManager
-	rootFS         fs.FS
 	notFoundPath   string
 }
 
@@ -77,14 +75,8 @@ func (aah AlbumArtworkHandler) find(
 
 	if err == library.ErrArtworkNotFound || os.IsNotExist(err) {
 		writer.WriteHeader(http.StatusNotFound)
-		notFoundImage, err := aah.rootFS.Open(aah.notFoundPath)
-		if err == nil {
-			defer notFoundImage.Close()
-			_, _ = io.Copy(writer, notFoundImage)
-		} else {
-			log.Printf("Error opening not-found image: %s\n", err)
-			fmt.Fprintln(writer, "404 image not found")
-		}
+		log.Printf("Error opening not-found image: %s\n", err)
+		fmt.Fprintln(writer, "404 image not found")
 		return nil
 	}
 
@@ -144,12 +136,10 @@ func (aah AlbumArtworkHandler) upload(
 // It needs an implementation of the ArtworkManager.
 func NewAlbumArtworkHandler(
 	am library.ArtworkManager,
-	httpRootFS fs.FS,
 	notFoundImagePath string,
 ) *AlbumArtworkHandler {
 
 	return &AlbumArtworkHandler{
-		rootFS:         httpRootFS,
 		artworkManager: am,
 		notFoundPath:   notFoundImagePath,
 	}
