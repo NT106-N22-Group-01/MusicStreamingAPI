@@ -82,6 +82,7 @@ func (srv *Server) serveGoroutine() {
 		srv.httpRootFS,
 		notFoundAlbumImage,
 	)
+	artistImageHandler := NewArtistImagesHandler(srv.library)
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
@@ -96,11 +97,17 @@ func (srv *Server) serveGoroutine() {
 	router.Handle(APIv1EndpointAlbumArtwork, artworkHandler).Methods(
 		APIv1Methods[APIv1EndpointAlbumArtwork]...,
 	)
+	router.Handle(APIv1EndpointArtistImage, artistImageHandler).Methods(
+		APIv1Methods[APIv1EndpointArtistImage]...,
+	)
 
 	router.Handle("/search/{searchQuery}", searchHandler).Methods("GET")
 	router.Handle("/search", searchHandler).Methods("GET")
 	router.Handle("/album/{albumID}", albumHandler).Methods("GET")
 	router.Handle("/album/{albumID}/artwork", artworkHandler).Methods(
+		"GET", "PUT", "DELETE",
+	)
+	router.Handle("/artist/{artistID}/image", artistImageHandler).Methods(
 		"GET", "PUT", "DELETE",
 	)
 	router.PathPrefix("/").Handler(staticFilesHandler).Methods("GET")
