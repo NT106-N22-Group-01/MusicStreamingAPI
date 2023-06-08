@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/gorilla/mux"
+
 	"NT106/Group01/MusicStreamingAPI/src/library"
 )
 
@@ -72,6 +74,20 @@ func (srv *Server) Serve() {
 }
 
 func (srv *Server) serveGoroutine() {
+	staticFilesHandler := http.FileServer(http.FS(srv.httpRootFS))
+	searchHandler := NewSearchHandler(srv.library)
+
+	router := mux.NewRouter()
+	router.StrictSlash(true)
+	router.UseEncodedPath()
+
+	router.Handle(APIv1EndpointSearchWithPath, searchHandler).Methods(
+		APIv1Methods[APIv1EndpointSearchWithPath]...,
+	)
+
+	router.Handle("/search/{searchQuery}", searchHandler).Methods("GET")
+	router.Handle("/search", searchHandler).Methods("GET")
+	router.PathPrefix("/").Handler(staticFilesHandler).Methods("GET")
 }
 
 // Uses our own listener to make our server stoppable. Similar to
