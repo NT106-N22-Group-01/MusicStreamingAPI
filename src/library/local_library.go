@@ -956,6 +956,39 @@ func (lib *LocalLibrary) Truncate() error {
 	return os.Remove(lib.database)
 }
 
+// Determines if the file will be saved to the database. Only media files which
+// jplayer can use are saved.
+func (lib *LocalLibrary) isSupportedFormat(path string) bool {
+	supportedFormats := []string{
+		".mp3",
+		".ogg",
+		".oga",
+		".wav",
+		".fla",
+		".flac",
+		".m4a",
+		".opus",
+		".webm",
+		".mp4",
+	}
+
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	if base == ext {
+		// This is a file such as "path/to/.hidden". There is no point in
+		// checking these. They really don't have extension. What is after
+		// the dot is the actual file name. It is just hidden.
+		return false
+	}
+
+	for _, format := range supportedFormats {
+		if strings.EqualFold(ext, format) {
+			return true
+		}
+	}
+	return false
+}
+
 // SetArtFinder bind a particular art.Finder to this library.
 func (lib *LocalLibrary) SetArtFinder(caf art.Finder) {
 	lib.artFinder = caf
