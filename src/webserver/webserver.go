@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"NT106/Group01/MusicStreamingAPI/src/config"
 	"NT106/Group01/MusicStreamingAPI/src/library"
 )
 
@@ -34,7 +35,7 @@ type Server struct {
 	cancelFunc context.CancelFunc
 
 	// Configuration of this server
-	// cfg config.Config
+	cfg config.Config
 
 	// Makes sure Serve does not return before all the starting work ha been finished
 	startWG sync.WaitGroup
@@ -47,9 +48,6 @@ type Server struct {
 
 	// This server's library with media
 	library *library.LocalLibrary
-
-	// htmlTemplatesFS is the directory with HTML templates.
-	// htmlTemplatesFS fs.FS
 
 	// httpRootFS is the directory which contains the
 	// static files served by HTTPMS.
@@ -86,6 +84,8 @@ func (srv *Server) serveGoroutine() {
 	artistImageHandler := NewArtistImagesHandler(srv.library)
 	browseHandler := NewBrowseHandler(srv.library)
 	mediaFileHandler := NewFileHandler(srv.library)
+	loginTokenHandler := NewLoginTokenHandler(srv.cfg.Authenticate)
+	registerTokenHandler := NewRigisterTokenHandler()
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
@@ -94,6 +94,9 @@ func (srv *Server) serveGoroutine() {
 	// API methods
 	router.Handle(APIv1EndpointSearchWithPath, searchHandler).Methods(
 		APIv1Methods[APIv1EndpointSearchWithPath]...,
+	)
+	router.Handle(APIv1EndpointSearch, searchHandler).Methods(
+		APIv1Methods[APIv1EndpointSearch]...,
 	)
 	router.Handle(APIv1EndpointDownloadAlbum, albumHandler).Methods(
 		APIv1Methods[APIv1EndpointDownloadAlbum]...,
@@ -109,6 +112,12 @@ func (srv *Server) serveGoroutine() {
 	)
 	router.Handle(APIv1EndpointFile, mediaFileHandler).Methods(
 		APIv1Methods[APIv1EndpointFile]...,
+	)
+	router.Handle(APIv1EndpointLoginToken, loginTokenHandler).Methods(
+		APIv1Methods[APIv1EndpointLoginToken]...,
+	)
+	router.Handle(APIv1EndpointRegisterToken, registerTokenHandler).Methods(
+		APIv1Methods[APIv1EndpointRegisterToken]...,
 	)
 
 	router.Handle("/search/{searchQuery}", searchHandler).Methods("GET")
@@ -192,7 +201,7 @@ func (srv *Server) Wait() {
 // server is ready and calling its Serve method will start it.
 func NewServer(
 	ctx context.Context,
-	//cfg config.Config,
+	cfg config.Config,
 	lib *library.LocalLibrary,
 	httpRootFS fs.FS,
 	htmlTemplatesFS fs.FS,
@@ -201,9 +210,8 @@ func NewServer(
 	return &Server{
 		ctx:        ctx,
 		cancelFunc: cancelCtx,
-		//cfg:             cfg,
+		cfg:        cfg,
 		library:    lib,
 		httpRootFS: httpRootFS,
-		//htmlTemplatesFS: htmlTemplatesFS,
 	}
 }
