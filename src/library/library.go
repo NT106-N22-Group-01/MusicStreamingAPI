@@ -78,6 +78,12 @@ type Library interface {
 	// Adds this media (file) to the library
 	AddMedia(string) error
 
+	// Get Listien Count
+	GetListenCount(int64) (int64, error)
+
+	// Increment Listen Count by 1
+	IncrementListenCount(int64) error
+
 	// Makes sure the library is initialied. This method will be called once on
 	// every start of the httpms
 	Initialize() error

@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,6 +57,11 @@ func (fh FileHandler) find(writer http.ResponseWriter, req *http.Request) error 
 
 	req.URL.Path = "/" + baseName
 	http.FileServer(http.Dir(filepath.Dir(filePath))).ServeHTTP(writer, req)
+
+	// Increment the listen count for the file
+	if err := fh.library.IncrementListenCount(int64(id)); err != nil {
+		log.Printf("Failed to increment listen count: %s", err.Error())
+	}
 
 	return nil
 }

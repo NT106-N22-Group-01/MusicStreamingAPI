@@ -85,6 +85,7 @@ func (srv *Server) serveGoroutine() {
 	artistImageHandler := NewArtistImagesHandler(srv.library)
 	browseHandler := NewBrowseHandler(srv.library)
 	mediaFileHandler := NewFileHandler(srv.library)
+	mediaFileHandlerCount := NewFileHandlerCount(srv.library)
 	loginTokenHandler := NewLoginTokenHandler(srv.db, srv.cfg.Secret)
 	registerTokenHandler := NewRigisterTokenHandler(srv.db, srv.cfg.Secret)
 
@@ -114,6 +115,9 @@ func (srv *Server) serveGoroutine() {
 	router.Handle(APIv1EndpointFile, mediaFileHandler).Methods(
 		APIv1Methods[APIv1EndpointFile]...,
 	)
+	router.Handle(APIv1EndpointFileCount, mediaFileHandlerCount).Methods(
+		APIv1Methods[APIv1EndpointFileCount]...,
+	)
 	router.Handle(APIv1EndpointLoginToken, loginTokenHandler).Methods(
 		APIv1Methods[APIv1EndpointLoginToken]...,
 	)
@@ -131,6 +135,7 @@ func (srv *Server) serveGoroutine() {
 		"GET", "PUT", "DELETE",
 	)
 	router.Handle("/file/{fileID}", mediaFileHandler).Methods("GET")
+	router.Handle("/file/{fileID}/count", mediaFileHandlerCount).Methods("GET")
 	router.Handle("/browse", browseHandler).Methods("GET")
 
 	handler := NewTerryHandler(router)

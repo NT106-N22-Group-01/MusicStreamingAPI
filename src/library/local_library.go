@@ -868,6 +868,71 @@ func (lib *LocalLibrary) setTrackID(title, fsPath string,
 	return trackID, nil
 }
 
+// This implementation retrieves the listen count for a specific track (fileID) from the tracks table in the database using a prepared statement.
+// It executes the query and scans the result into the listenCount variable. If any error occurs during the execution of the SQL query, it is returned.
+// Otherwise, the listenCount is returned along with a nil error.
+func (lib *LocalLibrary) GetListenCount(fileID int64) (int64, error) {
+	var listenCount int64
+
+	work := func(db *sql.DB) error {
+		stmt, err := db.Prepare(`
+			SELECT
+				listens_count
+			FROM
+				tracks
+			WHERE
+				id = ?
+		`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		err = stmt.QueryRow(fileID).Scan(&listenCount)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return 0, err
+	}
+
+	return listenCount, nil
+}
+
+// This implementation increments the listen count for a specific track (fileID) in the tracks table of the database.
+// It uses an UPDATE statement to update the listens_count column by adding 1 to its current value for the specified track ID.
+// The executeDBJobAndWait method is assumed to handle the execution of database operations and any potential errors.
+func (lib *LocalLibrary) IncrementListenCount(fileID int64) error {
+	work := func(db *sql.DB) error {
+		stmt, err := db.Prepare(`
+			UPDATE tracks
+			SET listens_count = listens_count + 1
+			WHERE id = ?
+		`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		_, err = stmt.Exec(fileID)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	if err := lib.executeDBJobAndWait(work); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Initialize should be run once every time a library is created. It checks for the
 // sqlite database file and creates one if it is absent. If a file is found
 // it does nothing.
