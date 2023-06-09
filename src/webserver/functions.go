@@ -1,11 +1,17 @@
 package webserver
 
 import (
-	"crypto/subtle"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
-	"NT106/Group01/MusicStreamingAPI/src/config"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+)
+
+const (
+	wrongLoginText = "wrong username or password"
 )
 
 // HandlerFuncWithError is similar to http.HandlerFunc but returns an error when
@@ -38,9 +44,34 @@ func WithInternalError(fnc HandlerFuncWithError) http.HandlerFunc {
 // The following check is carefully orchestrated so that it will take constant
 // time for wrong and correct pairs of username and password. This mitigates
 // simple timing attacks.
-func checkLoginCreds(user, pass string, auth config.Auth) bool {
-	userCheck := subtle.ConstantTimeCompare([]byte(user), []byte(auth.User))
-	passCheck := subtle.ConstantTimeCompare([]byte(pass), []byte(auth.Password))
+func checkLoginCreds(user, pass string, db *gorm.DB) bool {
+	var userModel User
+	if err := db.Where("username = ?", user).First(&userModel).Error; err != nil {
+		return false
+	}
 
-	return userCheck&passCheck == 1
+	err := bcrypt.CompareHashAndPassword([]byte(userModel.Password), []byte(pass))
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
+func respondWithJSONError(
+	w http.ResponseWriter,
+	code int,
+	msgf string,
+	args ...interface{},
+) {
+	resp := struct {
+		Error string `json:"error"`
+	}{
+		Error: fmt.Sprintf(msgf, args...),
+	}
+
+	enc := json.NewEncoder(w)
+
+	w.WriteHeader(code)
+	_ = enc.Encode(resp)
 }

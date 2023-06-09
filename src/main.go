@@ -219,7 +219,8 @@ func runServer(appfs afero.Fs, sqlFilesFS fs.FS) error {
 
 	go lib.Scan()
 
-	srv := webserver.NewServer(ctx, cfg, lib)
+	dbPath := helpers.AbsolutePath(cfg.SqliteDatabaseAuth, userPath)
+	srv := webserver.NewServer(ctx, cfg, lib, dbPath)
 	srv.Serve()
 	srv.Wait()
 	return nil

@@ -2,21 +2,16 @@ package webserver
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gbrlsnchs/jwt/v3"
-
-	"NT106/Group01/MusicStreamingAPI/src/config"
-)
-
-const (
-	wrongLoginText = "wrong username or password"
+	"gorm.io/gorm"
 )
 
 type loginTokenHandler struct {
-	auth config.Auth
+	db     *gorm.DB
+	secect string
 }
 
 var (
@@ -26,9 +21,10 @@ var (
 // NewLoginTokenHandler returns a new login handler which will use the information in
 // auth for deciding when device or program was logged in correctly by entering
 // username and password.
-func NewLoginTokenHandler(auth config.Auth) http.Handler {
+func NewLoginTokenHandler(db *gorm.DB, secect string) http.Handler {
 	return &loginTokenHandler{
-		auth: auth,
+		db:     db,
+		secect: secect,
 	}
 }
 
@@ -51,7 +47,7 @@ func (h *loginTokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !checkLoginCreds(reqBody.User, reqBody.Pass, h.auth) {
+	if !checkLoginCreds(reqBody.User, reqBody.Pass, h.db) {
 		respondWithJSONError(w, http.StatusUnauthorized, wrongLoginText)
 		return
 	}
@@ -62,7 +58,7 @@ func (h *loginTokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExpirationTime: jwt.NumericDate(time.Now().Add(rememberMeDuration)),
 	}
 
-	if len(h.auth.Secret) == 0 {
+	if len(h.secect) == 0 {
 		respondWithJSONError(
 			w,
 			http.StatusInternalServerError,
@@ -71,7 +67,7 @@ func (h *loginTokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := jwt.Sign(pl, jwt.NewHS256([]byte(h.auth.Secret)))
+	token, err := jwt.Sign(pl, jwt.NewHS256([]byte(h.secect)))
 	if err != nil {
 		respondWithJSONError(
 			w,
@@ -98,22 +94,4 @@ func (h *loginTokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-}
-
-func respondWithJSONError(
-	w http.ResponseWriter,
-	code int,
-	msgf string,
-	args ...interface{},
-) {
-	resp := struct {
-		Error string `json:"error"`
-	}{
-		Error: fmt.Sprintf(msgf, args...),
-	}
-
-	enc := json.NewEncoder(w)
-
-	w.WriteHeader(code)
-	_ = enc.Encode(resp)
 }

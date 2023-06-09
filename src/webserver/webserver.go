@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	"NT106/Group01/MusicStreamingAPI/src/config"
 	"NT106/Group01/MusicStreamingAPI/src/library"
@@ -20,10 +22,14 @@ const (
 	// notFoundAlbumImage is path to the image shown when there is no image
 	// for particular album. It must be relative path in httpRootFS.
 	notFoundAlbumImage = "images/unknownAlbum.png"
-
-	sessionCookieName  = "session"
-	returnToQueryParam = "return_to"
 )
+
+// User model
+type User struct {
+	ID       uint   `gorm:"primaryKey"`
+	Username string `gorm:"unique"`
+	Password string
+}
 
 // Server represents our web server. It will be controlled from here
 type Server struct {
@@ -47,6 +53,8 @@ type Server struct {
 
 	// This server's library with media
 	library *library.LocalLibrary
+
+	db *gorm.DB
 
 	// Makes the server lockable. This lock should be used for accessing the
 	// listener
@@ -77,8 +85,8 @@ func (srv *Server) serveGoroutine() {
 	artistImageHandler := NewArtistImagesHandler(srv.library)
 	browseHandler := NewBrowseHandler(srv.library)
 	mediaFileHandler := NewFileHandler(srv.library)
-	loginTokenHandler := NewLoginTokenHandler(srv.cfg.Authenticate)
-	registerTokenHandler := NewRigisterTokenHandler()
+	loginTokenHandler := NewLoginTokenHandler(srv.db, srv.cfg.Secret)
+	registerTokenHandler := NewRigisterTokenHandler(srv.db, srv.cfg.Secret)
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
@@ -136,16 +144,14 @@ func (srv *Server) serveGoroutine() {
 	}(handler)
 
 	srv.httpSrv = &http.Server{
-		Addr:           "localhost:80",
+		Addr:           srv.cfg.Listen,
 		Handler:        handler,
 		ReadTimeout:    15 * time.Second,
 		WriteTimeout:   1200 * time.Second,
 		MaxHeaderBytes: 1048576,
 	}
 
-	var reason error
-
-	reason = srv.listenAndServe()
+	var reason error = srv.listenAndServe()
 
 	log.Println("Webserver stopped.")
 
@@ -195,12 +201,26 @@ func NewServer(
 	ctx context.Context,
 	cfg config.Config,
 	lib *library.LocalLibrary,
+	databasePath string,
 ) *Server {
 	ctx, cancelCtx := context.WithCancel(ctx)
+
+	db, err := gorm.Open(sqlite.Open(databasePath), &gorm.Config{})
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+
+	// Perform automatic database migration
+	err = db.AutoMigrate(&User{})
+	if err != nil {
+		log.Fatal("Failed to migrate database:", err)
+	}
+
 	return &Server{
 		ctx:        ctx,
 		cancelFunc: cancelCtx,
 		cfg:        cfg,
 		library:    lib,
+		db:         db,
 	}
 }

@@ -42,25 +42,20 @@ func init() {
 // defaultConfig contains all the default values for the Euterpe configuration. Users
 // can overwrite values here with their user's configuration.
 var defaultConfig = Config{
-	Listen:         defaultlistAddress,
-	SqliteDatabase: "musicstreaming.db",
+	Listen:             defaultlistAddress,
+	SqliteDatabase:     "musicstreaming.db",
+	SqliteDatabaseAuth: "auth.db",
 }
 
 // Config contains representation for everything in config.json
 type Config struct {
-	Listen           string   `json:"listen,omitempty"`
-	Auth             bool     `json:"basic_authenticate,omitempty"`
-	Authenticate     Auth     `json:"authentication,omitempty"`
-	Libraries        []string `json:"libraries,omitempty"`
-	SqliteDatabase   string   `json:"sqlite_database,omitempty"`
-	DiscogsAuthToken string   `json:"discogs_auth_token,omitempty"`
-}
-
-// Auth represents a configuration HTTP Basic authentication
-type Auth struct {
-	User     string `json:"user,omitempty"`
-	Password string `json:"password,omitempty"`
-	Secret   string `json:"secret"`
+	Listen             string   `json:"listen,omitempty"`
+	Auth               bool     `json:"basic_authenticate,omitempty"`
+	Secret             string   `json:"secret"`
+	Libraries          []string `json:"libraries,omitempty"`
+	SqliteDatabase     string   `json:"sqlite_database,omitempty"`
+	SqliteDatabaseAuth string   `json:"sqlite_database_auth,omitempty"`
+	DiscogsAuthToken   string   `json:"discogs_auth_token,omitempty"`
 }
 
 // FindAndParse actually finds the configuration file, parsing it and merging it on
@@ -138,9 +133,7 @@ func copyDefaultOverUser(appfs afero.Fs) error {
 		Libraries: []string{
 			filepath.Join(homeDir, "Music"),
 		},
-		Authenticate: Auth{
-			Secret: hex.EncodeToString(randBuff),
-		},
+		Secret: hex.EncodeToString(randBuff),
 	}
 
 	userCfgPath := UserConfigPath(appfs)
