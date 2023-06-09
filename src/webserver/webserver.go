@@ -135,6 +135,22 @@ func (srv *Server) serveGoroutine() {
 
 	handler := NewTerryHandler(router)
 
+	if srv.cfg.Auth {
+		handler = NewAuthHandler(
+			handler,
+			srv.cfg.Secret,
+			srv.db,
+			[]string{
+				"/v1/login/token/",
+				"/login/",
+				"/css/",
+				"/js/",
+				"/favicon/",
+				"/fonts/",
+			},
+		)
+	}
+
 	handler = func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, closeRequest := context.WithCancel(srv.ctx)
