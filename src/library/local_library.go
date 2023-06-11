@@ -158,6 +158,7 @@ func (lib *LocalLibrary) Search(searchTerm string) []SearchResult {
 				t.number as track_number,
 				t.album_id as album_id,
 				t.fs_path as fs_path,
+				t.listens_count as view,
 				t.duration as duration
 			FROM
 				tracks as t
