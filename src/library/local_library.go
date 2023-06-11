@@ -182,7 +182,7 @@ func (lib *LocalLibrary) Search(searchTerm string) []SearchResult {
 
 			err := rows.Scan(&res.ID, &res.Title, &res.Album, &res.Artist,
 				&res.ArtistID, &res.TrackNumber, &res.AlbumID, &res.Format,
-				&res.Duration)
+				&res.View, &res.Duration)
 			if err != nil {
 				log.Printf("Error scanning search result: %s\n", err)
 				continue
