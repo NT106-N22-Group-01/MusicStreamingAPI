@@ -147,7 +147,7 @@ func (srv *Server) serveGoroutine() {
 			srv.db,
 			[]string{
 				"/v1/login/token/",
-				"/v1/reigster/token",
+				"/v1/reigster/token/",
 			},
 		)
 	}
