@@ -33,6 +33,9 @@ type SearchResult struct {
 	// File format of the underlying data file. Examples: "mp3", "flac", "ogg" etc.
 	Format string `json:"format"`
 
+	// View of Track
+	View int64 `json:"view"`
+
 	// Duration is the track length in milliseconds.
 	Duration int64 `json:"duration"`
 }

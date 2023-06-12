@@ -158,6 +158,7 @@ func (lib *LocalLibrary) Search(searchTerm string) []SearchResult {
 				t.number as track_number,
 				t.album_id as album_id,
 				t.fs_path as fs_path,
+				t.listens_count as view,
 				t.duration as duration
 			FROM
 				tracks as t
@@ -181,7 +182,7 @@ func (lib *LocalLibrary) Search(searchTerm string) []SearchResult {
 
 			err := rows.Scan(&res.ID, &res.Title, &res.Album, &res.Artist,
 				&res.ArtistID, &res.TrackNumber, &res.AlbumID, &res.Format,
-				&res.Duration)
+				&res.View, &res.Duration)
 			if err != nil {
 				log.Printf("Error scanning search result: %s\n", err)
 				continue

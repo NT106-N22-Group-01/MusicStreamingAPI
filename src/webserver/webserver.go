@@ -147,11 +147,7 @@ func (srv *Server) serveGoroutine() {
 			srv.db,
 			[]string{
 				"/v1/login/token/",
-				"/login/",
-				"/css/",
-				"/js/",
-				"/favicon/",
-				"/fonts/",
+				"/v1/register/token/",
 			},
 		)
 	}
